@@ -7,9 +7,8 @@ from langchain import hub
 from langchain_core.output_parsers import PydanticOutputParser
 from typing import Dict, Any, List
 from langchain_core.runnables import RunnableLambda
-import os
 
-from service.tools.search_tool import search_tool
+from service.tools.search_tool import search_notion_pages_tool
 from service.schemas.search_schema import SearchResult
 
 load_dotenv()
@@ -68,13 +67,7 @@ def call_search_agent(search_request: str) -> SearchResult:
         input_variables=["search_request"]
     )
 
-    tools_for_agent: List[Tool] = [
-        Tool(
-            name="Search Notion pages",
-            func=search_tool,
-            description="Search for pages in Notion workspace by title. Use when you need to find pages. Input should be a page title (e.g., 'Test').",
-        )
-    ]
+    tools_for_agent: List[Tool] = [search_notion_pages_tool]
     
     # Create agent with standard ReAct prompt
     agent = create_react_agent(llm=llm, tools=tools_for_agent, prompt=react_prompt)

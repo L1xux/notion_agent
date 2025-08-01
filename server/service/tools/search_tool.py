@@ -3,44 +3,17 @@ from datetime import datetime
 from notion_client import Client
 from config.env_config import get_notion_api_key
 from service.schemas.search_schema import PageInfo, SearchData, SearchResult
-from pydantic import BaseModel, Field
+from service.schemas.tool_schema import NotionSearchFilter, NotionSearchRequest
+from langchain_core.tools import Tool
 import re
 
 # Initialize Notion client
 notion: Client = Client(auth=get_notion_api_key())
 
-class NotionSearchFilter(BaseModel):
-    """Pydantic model for Notion search filter"""
-    property: str = Field(description="Property to filter by")
-    value: str = Field(description="Value to filter")
-
-class NotionSearchRequest(BaseModel):
-    """Pydantic model for Notion search request"""
-    query: str = Field(description="Search query")
-    filter: NotionSearchFilter = Field(description="Search filter")
-
-class NotionTitleProperty(BaseModel):
-    """Pydantic model for Notion title property"""
-    plain_text: str = Field(description="Plain text content")
-
-class NotionPageResponse(BaseModel):
-    """Pydantic model for Notion page response"""
-    id: str = Field(description="Page ID")
-    url: Optional[str] = Field(default=None, description="Page URL")
-    created_time: Optional[str] = Field(default=None, description="Creation time")
-    last_edited_time: Optional[str] = Field(default=None, description="Last edit time")
-    properties: Dict[str, Any] = Field(description="Page properties")
+# ===================== UTILITY FUNCTIONS =====================
 
 def extract_page_title(page_data: Dict[str, Any]) -> str:
-    """
-    Extract page title from Notion page data
-    
-    Args:
-        page_data: Raw page data from Notion API
-        
-    Returns:
-        Extracted page title as string
-    """
+    """Extract page title from Notion page data"""
     page_title_text: str = ""
     
     if "properties" in page_data and "title" in page_data["properties"]:
@@ -54,16 +27,7 @@ def extract_page_title(page_data: Dict[str, Any]) -> str:
     return page_title_text
 
 def create_page_info_from_data(page_data: Dict[str, Any], page_title: str) -> PageInfo:
-    """
-    Create PageInfo Pydantic model from raw page data
-    
-    Args:
-        page_data: Raw page data from Notion API
-        page_title: Extracted page title
-        
-    Returns:
-        PageInfo Pydantic model
-    """
+    """Create PageInfo Pydantic model from raw page data"""
     return PageInfo(
         id=page_data["id"],
         title=page_title,
@@ -73,33 +37,20 @@ def create_page_info_from_data(page_data: Dict[str, Any], page_title: str) -> Pa
     )
 
 def filter_matching_pages(pages: List[Dict[str, Any]], search_term: str) -> List[PageInfo]:
-    """
-    Filter pages that match the search term using regex
-    
-    Args:
-        pages: List of raw page data from Notion API
-        search_term: Search term to match against
-        
-    Returns:
-        List of matching PageInfo models
-    """
+    """Filter pages that match the search term using regex"""
     matching_pages: List[PageInfo] = []
     
     # Clean search term - remove quotes and whitespace
     cleaned_search_term: str = search_term.strip().strip('"').strip("'").strip()
     
     # Create regex pattern with case insensitive and unicode support
-    # Escape special regex characters in search term for safety
     escaped_search_term: str = re.escape(cleaned_search_term)
     pattern: re.Pattern[str] = re.compile(escaped_search_term, re.IGNORECASE | re.UNICODE)
-    
 
     for page in pages:
         raw_page_title: str = extract_page_title(page)
-        # Clean page title - remove quotes and whitespace
         cleaned_page_title: str = raw_page_title.strip().strip('"').strip("'").strip()
 
-        # Use regex search on cleaned page title
         if pattern.search(cleaned_page_title):
             page_info: PageInfo = create_page_info_from_data(page, cleaned_page_title)
             matching_pages.append(page_info)
@@ -110,15 +61,7 @@ def filter_matching_pages(pages: List[Dict[str, Any]], search_term: str) -> List
     return matching_pages
 
 def get_most_recent_page(pages: List[PageInfo]) -> Optional[PageInfo]:
-    """
-    Get the most recently created page from a list of pages
-    
-    Args:
-        pages: List of PageInfo models
-        
-    Returns:
-        Most recent PageInfo model, or None if no pages provided
-    """
+    """Get the most recently created page from a list of pages"""
     if not pages:
         return None
     
@@ -135,71 +78,86 @@ def get_most_recent_page(pages: List[PageInfo]) -> Optional[PageInfo]:
     
     return most_recent_page
 
-def search_tool(page_title: str) -> SearchResult:
+# ===================== SEARCH TOOL DECORATOR =====================
+
+def search_operation(success_message: str = "Search completed successfully", error_prefix: str = "Search failed"):
     """
-    Search for pages by title in Notion and return the most recently created page
+    Decorator for search operations with automatic error handling and result formatting
     
     Args:
-        page_title: Title of the page to search for (can be partial match)
-    
-    Returns:
-        SearchResult BaseModel with search results (only the most recent page if multiple matches)
+        success_message: Success message for logging
+        error_prefix: Error message prefix for failures
     """
-    print(f"🔍 search_tool called with: '{page_title}'")
+    def decorator(func):
+        def wrapper(page_title: str) -> SearchResult:
+            print(f"🔍 {func.__name__} called with: '{page_title}'")
+            
+            try:
+                result = func(page_title)
+                print(f"✅ {success_message}: {result}")
+                return result
+                
+            except Exception as e:
+                error_result: SearchResult = SearchResult(
+                    success=False,
+                    data=SearchData(pages=[], total_found=0),
+                    error=f"{error_prefix}: {str(e)}"
+                )
+                print(f"❌ {func.__name__} error: {error_result}")
+                return error_result
+        
+        wrapper.__name__ = func.__name__
+        wrapper.__doc__ = func.__doc__
+        return wrapper
     
-    try:
-        # Create search request
-        search_filter: NotionSearchFilter = NotionSearchFilter(
-            property="object",
-            value="page"
-        )
-        
-        search_request: NotionSearchRequest = NotionSearchRequest(
-            query=page_title,
-            filter=search_filter
-        )
-        
-        # Search for pages with the given title
-        response: Dict[str, Any] = notion.search(
-            query=search_request.query,
-            filter=search_request.filter.model_dump()
-        )
-        
-        print(f"📊 Notion API response: {response}")
-        
-        pages: List[Dict[str, Any]] = response.get("results", [])
-        
-        # Filter pages that match the title using regex (cleaning happens inside)
-        matching_pages: List[PageInfo] = filter_matching_pages(pages, page_title)
-        
-        # Get the most recent page (returns single PageInfo or None)
-        most_recent_page: Optional[PageInfo] = get_most_recent_page(matching_pages)
-        
-        # Create final pages list
-        final_pages: List[PageInfo] = [most_recent_page] if most_recent_page else []
-        
-        # Create SearchData BaseModel
-        search_data: SearchData = SearchData(
-            pages=final_pages,
-            total_found=len(final_pages)
-        )
-        
-        # Create and return SearchResult BaseModel
-        result: SearchResult = SearchResult(
-            success=True,
-            data=search_data,
-            error=""
-        )
-        
-        print(f"✅ search_tool result: {result}")
-        return result
-        
-    except Exception as e:
-        # Create error SearchResult BaseModel
-        error_result: SearchResult = SearchResult(
-            success=False,
-            data=SearchData(pages=[], total_found=0),
-            error=str(e)
-        )
-        print(f"❌ search_tool error: {error_result}")
-        return error_result 
+    return decorator
+
+# ===================== SEARCH TOOL FUNCTIONS =====================
+
+@search_operation("Search completed successfully", "Search failed")
+def search_tool(page_title: str) -> SearchResult:
+    """Search for pages by title in Notion and return the most recently created page"""
+    # Create search request
+    search_filter: NotionSearchFilter = NotionSearchFilter(
+        property="object",
+        value="page"
+    )
+    
+    search_request: NotionSearchRequest = NotionSearchRequest(
+        query=page_title,
+        filter=search_filter
+    )
+    
+    # Search for pages with the given title
+    response: Dict[str, Any] = notion.search(
+        query=search_request.query,
+        filter=search_request.filter.model_dump()
+    )
+    
+    print(f"📊 Notion API response: {response}")
+    
+    pages: List[Dict[str, Any]] = response.get("results", [])
+    
+    # Filter pages that match the title using regex
+    matching_pages: List[PageInfo] = filter_matching_pages(pages, page_title)
+    
+    # Get the most recent page
+    most_recent_page: Optional[PageInfo] = get_most_recent_page(matching_pages)
+    
+    # Create final pages list
+    final_pages: List[PageInfo] = [most_recent_page] if most_recent_page else []
+    
+    # Create and return SearchResult
+    return SearchResult(
+        success=True,
+        data=SearchData(pages=final_pages, total_found=len(final_pages)),
+        error=""
+    )
+
+# ===================== LANGCHAIN TOOL DEFINITIONS =====================
+
+search_notion_pages_tool = Tool(
+    name="Search Notion pages",
+    func=search_tool,
+    description="Search for pages in Notion workspace by title. Use when you need to find pages. Input should be a page title (e.g., 'Test').",
+) 

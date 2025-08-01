@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class EnvConfig(BaseModel):
     """Pydantic model for environment configuration"""
     notion_api_key: Optional[str] = Field(default=None, description="Notion API key")
+    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key")
     fastapi_host: str = Field(default="0.0.0.0", description="FastAPI host")
     fastapi_port: int = Field(default=8000, description="FastAPI port")
     fastapi_debug: bool = Field(default=True, description="FastAPI debug mode")
@@ -24,6 +25,15 @@ def get_notion_api_key() -> Optional[str]:
     """
     load_env_config()
     return os.getenv("NOTION_API_KEY")
+
+def get_openai_api_key() -> Optional[str]:
+    """Get OpenAI API key from environment variables
+    
+    Returns:
+        Optional OpenAI API key string
+    """
+    load_env_config()
+    return os.getenv("OPENAI_API_KEY")
 
 def get_fastapi_host() -> str:
     """Get FastAPI host from environment variables
@@ -74,6 +84,7 @@ def get_env_config() -> EnvConfig:
     load_env_config()
     return EnvConfig(
         notion_api_key=get_notion_api_key(),
+        openai_api_key=get_openai_api_key(),
         fastapi_host=get_fastapi_host(),
         fastapi_port=get_fastapi_port(),
         fastapi_debug=get_fastapi_debug(),

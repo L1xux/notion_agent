@@ -1,5 +1,4 @@
 from typing import List, Dict, Any
-from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 
 class PageInfo(BaseModel):
@@ -40,5 +39,4 @@ class SearchResult(BaseModel):
             "error": self.error
         }
 
-# Create parser for the actual search result structure
-search_result_parser = PydanticOutputParser(pydantic_object=SearchResult) 
+ 
