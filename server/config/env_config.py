@@ -15,7 +15,7 @@ class EnvConfig(BaseModel):
 
 def load_env_config() -> None:
     """Load environment variables from .env file"""
-    load_dotenv()
+    pass  # Environment variables are now loaded in main.py
 
 def get_notion_api_key() -> Optional[str]:
     """Get Notion API key from environment variables
@@ -23,7 +23,6 @@ def get_notion_api_key() -> Optional[str]:
     Returns:
         Optional Notion API key string
     """
-    load_env_config()
     return os.getenv("NOTION_API_KEY")
 
 def get_openai_api_key() -> Optional[str]:
@@ -32,7 +31,6 @@ def get_openai_api_key() -> Optional[str]:
     Returns:
         Optional OpenAI API key string
     """
-    load_env_config()
     return os.getenv("OPENAI_API_KEY")
 
 def get_fastapi_host() -> str:
@@ -81,7 +79,6 @@ def get_env_config() -> EnvConfig:
     Returns:
         EnvConfig Pydantic model with all environment settings
     """
-    load_env_config()
     return EnvConfig(
         notion_api_key=get_notion_api_key(),
         openai_api_key=get_openai_api_key(),

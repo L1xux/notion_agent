@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, Union, List
 import json
 from notion_client import Client
 from config.env_config import get_notion_api_key
@@ -18,6 +18,9 @@ def _clean_json_input(input_str: str) -> str:
         cleaned = cleaned[3:]
     if cleaned.endswith("```"):
         cleaned = cleaned[:-3]
+    # Handle inline backticks
+    if cleaned.startswith("`") and cleaned.endswith("`") and len(cleaned) >= 2:
+        cleaned = cleaned[1:-1]
     return cleaned.strip()
 
 # Optimized block creation using dictionaries for configuration
@@ -31,12 +34,18 @@ BLOCK_CONFIGS = {
     "toggle": {"color": "default"}
 }
 
-def _create_simple_block(block_type: str, content: str, **kwargs) -> Dict[str, Any]:
-    """Create a simple Notion block with basic text content"""
+def _create_block(block_type: str, content: Union[str, List[Dict]], **kwargs) -> Dict[str, Any]:
+    """Create a unified Notion block that handles both text and rich_text_array"""
+    # Handle rich text content
+    if isinstance(content, list):
+        rich_text = content
+    else:
+        rich_text = [{"type": "text", "text": {"content": str(content)}}]
+    
     block = {
         "object": "block",
         "type": block_type,
-        block_type: {"rich_text": [{"type": "text", "text": {"content": content}}]}
+        block_type: {"rich_text": rich_text}
     }
     
     # Apply type-specific configuration
@@ -63,14 +72,21 @@ def _create_structural_block(block_type: str, **kwargs) -> Dict[str, Any]:
     }
 
 def _create_media_block(block_type: str, url: str, **kwargs) -> Dict[str, Any]:
-    """Create media blocks with URL"""
-    # Clean URL - remove any whitespace and ensure it's a valid URL format
+    """Create media blocks with correct Notion API structure"""
     url = url.strip()
+    
+    # Adjust structure based on Notion API requirements for different media types
+    if block_type in ["image", "video"]:
+        block_content = {"type": "external", "external": {"url": url}}
+    elif block_type in ["embed", "bookmark", "link_preview"]:
+        block_content = {"url": url}
+    else:
+        raise ValueError(f"Unsupported media block type: {block_type}")
     
     block = {
         "object": "block",
         "type": block_type,
-        block_type: {"type": "external", "external": {"url": url}}
+        block_type: block_content
     }
     
     if caption := kwargs.get("caption"):
@@ -78,61 +94,63 @@ def _create_media_block(block_type: str, url: str, **kwargs) -> Dict[str, Any]:
     
     return block
 
+
 def _append_block_to_page(page_id: str, block: Dict[str, Any]) -> Dict[str, Any]:
     """Append a single block to a Notion page"""
     return notion.blocks.children.append(block_id=page_id, children=[block])
 
-# ===================== BLOCK CREATION FUNCTIONS =====================
+# ===================== UNIFIED BLOCK CREATION FUNCTIONS =====================
 
-def add_notion_heading_block(page_id: str, text: str, level: int = 1) -> Dict[str, Any]:
-    """Add heading block to Notion page"""
+def add_notion_heading_block(page_id: str, content: Union[str, List[Dict]], level: int = 1) -> Dict[str, Any]:
+    """Add heading block to Notion page (supports both text and rich_text_array)"""
     block_type = f"heading_{level}" if 1 <= level <= 3 else "heading_1"
-    block = _create_simple_block(block_type, text)
+    block = _create_block(block_type, content)
     return _append_block_to_page(page_id, block)
 
-def add_notion_paragraph_block(page_id: str, text: str) -> Dict[str, Any]:
-    """Add paragraph block to Notion page"""
-    block = _create_simple_block("paragraph", text)
+def add_notion_paragraph_block(page_id: str, content: Union[str, List[Dict]]) -> Dict[str, Any]:
+    """Add paragraph block to Notion page (supports both text and rich_text_array)"""
+    block = _create_block("paragraph", content)
     return _append_block_to_page(page_id, block)
 
-def add_notion_callout_block(page_id: str, text: str, icon: str = "💡") -> Dict[str, Any]:
-    """Add callout block to Notion page"""
-    block = _create_simple_block("callout", text, icon=icon)
+def add_notion_callout_block(page_id: str, content: Union[str, List[Dict]], icon: str = "💡") -> Dict[str, Any]:
+    """Add callout block to Notion page (supports both text and rich_text_array)"""
+    block = _create_block("callout", content, icon={"emoji": icon})
     return _append_block_to_page(page_id, block)
 
-def add_notion_quote_block(page_id: str, text: str) -> Dict[str, Any]:
-    """Add quote block to Notion page"""
-    block = _create_simple_block("quote", text)
+def add_notion_quote_block(page_id: str, content: Union[str, List[Dict]]) -> Dict[str, Any]:
+    """Add quote block to Notion page (supports both text and rich_text_array)"""
+    block = _create_block("quote", content)
     return _append_block_to_page(page_id, block)
 
+def add_notion_toggle_block(page_id: str, content: Union[str, List[Dict]]) -> Dict[str, Any]:
+    """Add toggle block to Notion page (supports both text and rich_text_array)"""
+    block = _create_block("toggle", content)
+    return _append_block_to_page(page_id, block)
+
+def add_notion_to_do_block(page_id: str, content: Union[str, List[Dict]], checked: bool = False) -> Dict[str, Any]:
+    """Add to-do block to Notion page (supports both text and rich_text_array)"""
+    block = _create_block("to_do", content, checked=checked)
+    return _append_block_to_page(page_id, block)
+
+def add_notion_bulleted_list_block(page_id: str, content: Union[str, List[Dict]]) -> Dict[str, Any]:
+    """Add bulleted list block to Notion page (supports both text and rich_text_array)"""
+    block = _create_block("bulleted_list_item", content)
+    return _append_block_to_page(page_id, block)
+
+def add_notion_numbered_list_block(page_id: str, content: Union[str, List[Dict]]) -> Dict[str, Any]:
+    """Add numbered list block to Notion page (supports both text and rich_text_array)"""
+    block = _create_block("numbered_list_item", content)
+    return _append_block_to_page(page_id, block)
+
+def add_notion_code_block(page_id: str, content: Union[str, List[Dict]], language: str = "python") -> Dict[str, Any]:
+    """Add code block to Notion page (supports both text and rich_text_array)"""
+    block = _create_block("code", content, language=language)
+    return _append_block_to_page(page_id, block)
+
+# Structural blocks (no text content)
 def add_notion_divider_block(page_id: str) -> Dict[str, Any]:
     """Add divider block to Notion page"""
     block = _create_structural_block("divider")
-    return _append_block_to_page(page_id, block)
-
-def add_notion_toggle_block(page_id: str, text: str) -> Dict[str, Any]:
-    """Add toggle block to Notion page"""
-    block = _create_simple_block("toggle", text)
-    return _append_block_to_page(page_id, block)
-
-def add_notion_code_block(page_id: str, text: str, language: str = "python") -> Dict[str, Any]:
-    """Add code block to Notion page"""
-    block = _create_simple_block("code", text, language=language)
-    return _append_block_to_page(page_id, block)
-
-def add_notion_to_do_block(page_id: str, text: str, checked: bool = False) -> Dict[str, Any]:
-    """Add to-do block to Notion page"""
-    block = _create_simple_block("to_do", text, checked=checked)
-    return _append_block_to_page(page_id, block)
-
-def add_notion_bulleted_list_block(page_id: str, text: str) -> Dict[str, Any]:
-    """Add bulleted list block to Notion page"""
-    block = _create_simple_block("bulleted_list_item", text)
-    return _append_block_to_page(page_id, block)
-
-def add_notion_numbered_list_block(page_id: str, text: str) -> Dict[str, Any]:
-    """Add numbered list block to Notion page"""
-    block = _create_simple_block("numbered_list_item", text)
     return _append_block_to_page(page_id, block)
 
 def add_notion_table_of_contents_block(page_id: str) -> Dict[str, Any]:
@@ -145,47 +163,12 @@ def add_notion_breadcrumb_block(page_id: str) -> Dict[str, Any]:
     block = _create_structural_block("breadcrumb")
     return _append_block_to_page(page_id, block)
 
-def add_notion_equation_block(page_id: str, expression: str) -> Dict[str, Any]:
+def add_notion_equation_block(page_id: str, expression: str = "E = mc^2") -> Dict[str, Any]:
     """Add equation block to Notion page"""
     block = _create_structural_block("equation", expression=expression)
     return _append_block_to_page(page_id, block)
 
-def add_notion_table_block(page_id: str, table_width: int = 3, table_height: int = 3, has_column_header: bool = True, has_row_header: bool = False) -> Dict[str, Any]:
-    """Add table block to Notion page"""
-    children = []
-    
-    # Create all rows (header + data rows)
-    for row in range(table_height):
-        row_cells = []
-        for col in range(table_width):
-            # Determine cell content
-            if has_column_header and row == 0:
-                content = f"Header {col + 1}"
-            elif has_row_header and col == 0:
-                content = f"Row {row + 1}" if not (has_column_header and row == 0) else "Header 1"
-            else:
-                content = ""
-            
-            row_cells.append([{"type": "text", "text": {"content": content}}])
-        
-        children.append({
-            "type": "table_row", 
-            "table_row": {"cells": row_cells}
-        })
-    
-    block = {
-        "object": "block",
-        "type": "table",
-        "table": {
-            "table_width": table_width,
-            "has_column_header": has_column_header,
-            "has_row_header": has_row_header,
-            "children": children
-        }
-    }
-    
-    return _append_block_to_page(page_id, block)
-
+# Media blocks
 def add_notion_image_block(page_id: str, image_url: str, caption: str = "") -> Dict[str, Any]:
     """Add image block to Notion page"""
     block = _create_media_block("image", image_url, caption=caption)
@@ -202,276 +185,304 @@ def add_notion_embed_block(page_id: str, embed_url: str, caption: str = "") -> D
     return _append_block_to_page(page_id, block)
 
 def add_notion_url_block(page_id: str, url: str, title: str = "") -> Dict[str, Any]:
-    """Add URL link as paragraph block to Notion page"""
-    text = title if title else url
-    block = {
-        "object": "block",
-        "type": "paragraph",
-        "paragraph": {
-            "rich_text": [{
-                "type": "text",
-                "text": {"content": text, "link": {"url": url}}
-            }]
-        }
-    }
+    """Add URL block to Notion page"""
+    block = _create_media_block("link_preview", url, title=title)
     return _append_block_to_page(page_id, block)
 
 def add_notion_bookmark_block(page_id: str, bookmark_url: str, caption: str = "") -> Dict[str, Any]:
     """Add bookmark block to Notion page"""
-    block = {
-        "object": "block",
-        "type": "bookmark",
-        "bookmark": {"url": bookmark_url}
-    }
-    if caption:
-        block["bookmark"]["caption"] = [{"type": "text", "text": {"content": caption}}]
+    block = _create_media_block("bookmark", bookmark_url, caption=caption)
     return _append_block_to_page(page_id, block)
 
-# ===================== LANGCHAIN TOOL WRAPPERS =====================
-
-def notion_tool(required_params=None, optional_params=None, success_message="Added block"):
-    """
-    Decorator for creating Notion block tools with automatic JSON parsing and error handling
-    
-    Args:
-        required_params: List of required parameter names
-        optional_params: Dict of optional parameters with defaults
-        success_message: Success message string or callable
-    """
-    def decorator(func):
-        def wrapper(input_str: str) -> str:
-            try:
-                cleaned = _clean_json_input(input_str)
-                data = json.loads(cleaned)
-                
-                # Validate required parameters
-                req_params = required_params or []
-                missing = [p for p in req_params if not data.get(p)]
-                if missing:
-                    raise ValueError(f"{', '.join(missing)} are required")
-                
-                # Extract parameters
-                args = [data.get(p) for p in req_params]
-                kwargs = {k: data.get(k, v) for k, v in (optional_params or {}).items()}
-                
-                # Execute function
-                result = func(*args, **kwargs)
-                
-                # Generate message
-                message = success_message(data) if callable(success_message) else success_message
-                
-                return json.dumps({
-                    "success": True,
-                    "message": message,
-                    "block_id": result["results"][0]["id"] if result.get("results") else None
-                }, ensure_ascii=False)
-                
-            except Exception as e:
-                block_type = func.__name__.replace('add_notion_', '').replace('_block', '')
-                return json.dumps({
-                    "success": False,
-                    "error": f"Failed to add {block_type} block: {str(e)}"
-                })
+# Table creation function
+def add_notion_table_block(page_id: str, table_width: int = 1, table_height: int = 1, 
+                          has_column_header: bool = False, has_row_header: bool = False) -> Dict[str, Any]:
+    """Add table block to Notion page"""
+    # Create empty table data
+    children = []
+    for row in range(table_height):
+        row_cells = []
+        for col in range(table_width):
+            row_cells.append([{"type": "text", "text": {"content": ""}}])
         
-        wrapper.__name__ = f"{func.__name__}_tool"
-        wrapper.__doc__ = f"Tool: {func.__doc__ or 'Add block to Notion page'}"
-        return wrapper
+        children.append({
+            "type": "table_row",
+            "table_row": {"cells": row_cells}
+        })
     
-    return decorator
+    table_block = {
+        "type": "table",
+        "table": {
+            "table_width": table_width,
+            "has_column_header": has_column_header,
+            "has_row_header": has_row_header,
+            "children": children
+        }
+    }
+    
+    return notion.blocks.children.append(block_id=page_id, children=[table_block])
 
-# Clean decorator-based tool definitions
-@notion_tool(["page_id", "text"], {"level": 1}, lambda d: f"Added heading_{d.get('level', 1)} block")
-def add_heading_block_tool(page_id: str, text: str, level: int = 1) -> Dict[str, Any]:
-    return add_notion_heading_block(page_id, text, level)
+# ===================== UNIFIED TOOL WRAPPER FUNCTIONS =====================
 
-@notion_tool(["page_id", "text"], success_message="Added paragraph block")
-def add_paragraph_block_tool(page_id: str, text: str) -> Dict[str, Any]:
-    return add_notion_paragraph_block(page_id, text)
+def create_unified_tool_func(block_func, required_params, optional_params=None, success_message="Block added successfully"):
+    """Create a unified tool wrapper function"""
+    def tool_func(input_str: str) -> str:
+        try:
+            data = json.loads(_clean_json_input(input_str))
 
-@notion_tool(["page_id", "text"], {"icon": "💡"}, lambda d: f"Added callout block with {d.get('icon', '💡')} icon")
-def add_callout_block_tool(page_id: str, text: str, icon: str = "💡") -> Dict[str, Any]:
-    return add_notion_callout_block(page_id, text, icon)
+            # Handle both text and rich_text_array
+            if "rich_text_array" in data:
+                content = data["rich_text_array"]
+                content_provided = True
+            elif "text" in data:
+                content = data["text"]
+                content_provided = True
+            else:
+                content = ""
+                content_provided = False
 
-@notion_tool(["page_id", "text"], success_message="Added quote block")
-def add_quote_block_tool(page_id: str, text: str) -> Dict[str, Any]:
-    return add_notion_quote_block(page_id, text)
+            # Validate required parameters (excluding text since we handle text/rich_text_array above)
+            content_required = "text" in required_params
+            other_required_params = [p for p in required_params if p != "text"]
+            missing = [p for p in other_required_params if not data.get(p)]
 
-@notion_tool(["page_id"], success_message="Added divider block")
-def add_divider_block_tool(page_id: str) -> Dict[str, Any]:
-    return add_notion_divider_block(page_id)
+            # Check if content is needed: either "text" is required OR rich_text_array is provided
+            needs_content = content_required or "rich_text_array" in data
+            if needs_content and not content_provided:
+                missing.append("text or rich_text_array")
+            if missing:
+                raise ValueError(f"{', '.join(missing)} are required")
 
-@notion_tool(["page_id", "text"], success_message="Added toggle block")
-def add_toggle_block_tool(page_id: str, text: str) -> Dict[str, Any]:
-    return add_notion_toggle_block(page_id, text)
+            # Prepare arguments
+            args = [data["page_id"]]
+            if content_provided:
+                args.append(content)
 
-@notion_tool(["page_id", "text"], {"language": "python"}, lambda d: f"Added {d.get('language', 'python')} code block")
-def add_code_block_tool(page_id: str, text: str, language: str = "python") -> Dict[str, Any]:
-    return add_notion_code_block(page_id, text, language)
+            # Add other required params (excluding page_id and text)
+            for param in required_params:
+                if param not in ["page_id", "text"]:
+                    args.append(data[param])
 
-@notion_tool(["page_id", "text"], {"checked": False}, lambda d: f"Added to-do block ({'checked' if d.get('checked', False) else 'unchecked'})")
-def add_todo_block_tool(page_id: str, text: str, checked: bool = False) -> Dict[str, Any]:
-    return add_notion_to_do_block(page_id, text, checked)
+            # Add optional parameters
+            kwargs = {}
+            if optional_params:
+                for k, default_val in optional_params.items():
+                    if k in data:
+                        kwargs[k] = data[k]
+                    elif default_val is not None:
+                        kwargs[k] = default_val
+            # Execute function
+            result = block_func(*args, **kwargs)
 
-@notion_tool(["page_id", "text"], success_message="Added bulleted list item")
-def add_bulleted_list_tool(page_id: str, text: str) -> Dict[str, Any]:
-    return add_notion_bulleted_list_block(page_id, text)
+            return json.dumps({
+                "success": True,
+                "message": success_message,
+                "block_id": result["results"][0]["id"] if result.get("results") else None
+            })
 
-@notion_tool(["page_id", "text"], success_message="Added numbered list item")
-def add_numbered_list_tool(page_id: str, text: str) -> Dict[str, Any]:
-    return add_notion_numbered_list_block(page_id, text)
+        except Exception as e:
+            return json.dumps({
+                "success": False,
+                "error": str(e)
+            })
+    
+    return tool_func
 
-@notion_tool(["page_id"], success_message="Added table of contents")
-def add_table_of_contents_tool(page_id: str) -> Dict[str, Any]:
-    return add_notion_table_of_contents_block(page_id)
+# ===================== TOOL FUNCTIONS =====================
 
-@notion_tool(["page_id"], success_message="Added breadcrumb")
-def add_breadcrumb_tool(page_id: str) -> Dict[str, Any]:
-    return add_notion_breadcrumb_block(page_id)
+add_heading_block_tool_func = create_unified_tool_func(
+    add_notion_heading_block, ["page_id"], {"level": 1}, "Added heading block"
+)
 
-@notion_tool(["page_id"], {"expression": "E = mc^2"}, lambda d: f"Added equation: {d.get('expression', 'E = mc^2')}")
-def add_equation_tool(page_id: str, expression: str = "E = mc^2") -> Dict[str, Any]:
-    return add_notion_equation_block(page_id, expression)
+add_paragraph_block_tool_func = create_unified_tool_func(
+    add_notion_paragraph_block, ["page_id"], None, "Added paragraph block"
+)
 
-@notion_tool(["page_id"], {"table_width": 1, "table_height": 1, "has_column_header": False, "has_row_header": False}, 
-             lambda d: f"Added table ({d.get('table_width', 1)}x{d.get('table_height', 1)})")
-def add_table_tool(page_id: str, table_width: int = 1, table_height: int = 1, has_column_header: bool = False, has_row_header: bool = False) -> Dict[str, Any]:
-    return add_notion_table_block(page_id, table_width, table_height, has_column_header, has_row_header)
+add_callout_block_tool_func = create_unified_tool_func(
+    add_notion_callout_block, ["page_id"], {"icon": "💡"}, "Added callout block"
+)
 
-@notion_tool(["page_id", "image_url"], {"caption": ""}, success_message="Added image block")
-def add_image_block_tool(page_id: str, image_url: str, caption: str = "") -> Dict[str, Any]:
-    return add_notion_image_block(page_id, image_url, caption)
+add_quote_block_tool_func = create_unified_tool_func(
+    add_notion_quote_block, ["page_id"], None, "Added quote block"
+)
 
-@notion_tool(["page_id", "video_url"], {"caption": ""}, success_message="Added video block")
-def add_video_block_tool(page_id: str, video_url: str, caption: str = "") -> Dict[str, Any]:
-    return add_notion_video_block(page_id, video_url, caption)
+add_toggle_block_tool_func = create_unified_tool_func(
+    add_notion_toggle_block, ["page_id"], None, "Added toggle block"
+)
 
-@notion_tool(["page_id", "embed_url"], {"caption": ""}, success_message="Added embed block")
-def add_embed_block_tool(page_id: str, embed_url: str, caption: str = "") -> Dict[str, Any]:
-    return add_notion_embed_block(page_id, embed_url, caption)
+add_todo_block_tool_func = create_unified_tool_func(
+    add_notion_to_do_block, ["page_id"], {"checked": False}, "Added todo block"
+)
 
-@notion_tool(["page_id", "url"], {"title": ""}, success_message="Added URL block")
-def add_url_block_tool(page_id: str, url: str, title: str = "") -> Dict[str, Any]:
-    return add_notion_url_block(page_id, url, title)
+add_bulleted_list_tool_func = create_unified_tool_func(
+    add_notion_bulleted_list_block, ["page_id"], None, "Added bulleted list item"
+)
 
-@notion_tool(["page_id", "bookmark_url"], {"caption": ""}, success_message="Added bookmark block")
-def add_bookmark_block_tool(page_id: str, bookmark_url: str, caption: str = "") -> Dict[str, Any]:
-    return add_notion_bookmark_block(page_id, bookmark_url, caption)
+add_numbered_list_tool_func = create_unified_tool_func(
+    add_notion_numbered_list_block, ["page_id"], None, "Added numbered list item"
+)
+
+add_code_block_tool_func = create_unified_tool_func(
+    add_notion_code_block, ["page_id"], {"language": "python"}, "Added code block"
+)
+
+add_divider_block_tool_func = create_unified_tool_func(
+    add_notion_divider_block, ["page_id"], None, "Added divider block"
+)
+
+add_table_of_contents_tool_func = create_unified_tool_func(
+    add_notion_table_of_contents_block, ["page_id"], None, "Added table of contents"
+)
+
+add_breadcrumb_tool_func = create_unified_tool_func(
+    add_notion_breadcrumb_block, ["page_id"], None, "Added breadcrumb"
+)
+
+add_equation_tool_func = create_unified_tool_func(
+    add_notion_equation_block, ["page_id"], {"expression": "E = mc^2"}, "Added equation"
+)
+
+add_image_block_tool_func = create_unified_tool_func(
+    add_notion_image_block, ["page_id", "image_url"], {"caption": ""}, "Added image block"
+)
+
+add_video_block_tool_func = create_unified_tool_func(
+    add_notion_video_block, ["page_id", "video_url"], {"caption": ""}, "Added video block"
+)
+
+add_embed_block_tool_func = create_unified_tool_func(
+    add_notion_embed_block, ["page_id", "embed_url"], {"caption": ""}, "Added embed block"
+)
+
+add_url_block_tool_func = create_unified_tool_func(
+    add_notion_url_block, ["page_id", "url"], {"title": ""}, "Added URL block"
+)
+
+add_bookmark_block_tool_func = create_unified_tool_func(
+    add_notion_bookmark_block, ["page_id", "bookmark_url"], {"caption": ""}, "Added bookmark block"
+)
+
+add_table_tool_func = create_unified_tool_func(
+    add_notion_table_block,
+    ["page_id"],
+    {"table_width": 1, "table_height": 1, "has_column_header": False, "has_row_header": False},
+    "Added table block"
+)
 
 # ===================== LANGCHAIN TOOL DEFINITIONS =====================
 
 add_heading_tool = Tool(
     name="Add Heading Block",
-    description="Add heading block (h1/h2/h3) to Notion page with text",
-    func=add_heading_block_tool
+    description="Add heading block (h1/h2/h3) to Notion page. Supports both text and rich_text_array. Input: JSON with page_id, text/rich_text_array, and optional level (1-3)",
+    func=add_heading_block_tool_func
 )
 
 add_paragraph_tool = Tool(
     name="Add Paragraph Block", 
-    description="Add paragraph block to Notion page with text",
-    func=add_paragraph_block_tool
+    description="Add paragraph block to Notion page. Supports both text and rich_text_array. Input: JSON with page_id and text/rich_text_array",
+    func=add_paragraph_block_tool_func
 )
 
 add_callout_tool = Tool(
     name="Add Callout Block",
-    description="Add callout block to Notion page with icon (for important notes)",
-    func=add_callout_block_tool
+    description="Add callout block to Notion page. Supports both text and rich_text_array. Input: JSON with page_id, text/rich_text_array, and optional icon",
+    func=add_callout_block_tool_func
 )
 
 add_quote_tool = Tool(
     name="Add Quote Block",
-    description="Add quote block to Notion page for highlighting quotes",
-    func=add_quote_block_tool
+    description="Add quote block to Notion page. Supports both text and rich_text_array. Input: JSON with page_id and text/rich_text_array",
+    func=add_quote_block_tool_func
 )
 
 add_divider_tool = Tool(
     name="Add Divider Block",
-    description="Add divider line block to Notion page for section separation",
-    func=add_divider_block_tool
+    description="Add divider line block to Notion page. Input: JSON with page_id",
+    func=add_divider_block_tool_func
 )
 
 add_toggle_tool = Tool(
     name="Add Toggle Block",
-    description="Add toggle block to Notion page for collapsible content",
-    func=add_toggle_block_tool
+    description="Add toggle block to Notion page. Supports both text and rich_text_array. Input: JSON with page_id and text/rich_text_array",
+    func=add_toggle_block_tool_func
 )
 
 add_code_tool = Tool(
     name="Add Code Block",
-    description="Add code block to Notion page with syntax highlighting",
-    func=add_code_block_tool
+    description="Add code block to Notion page. Supports both text and rich_text_array. Input: JSON with page_id, text/rich_text_array, and optional language",
+    func=add_code_block_tool_func
 )
 
 add_todo_tool = Tool(
     name="Add Todo Block",
-    description="Add to-do checklist item to Notion page with checked/unchecked state",
-    func=add_todo_block_tool
+    description="Add todo/checkbox block to Notion page. Supports both text and rich_text_array. Input: JSON with page_id, text/rich_text_array, and optional checked boolean",
+    func=add_todo_block_tool_func
 )
 
 add_bulleted_list_tool_obj = Tool(
-    name="Add Bulleted List",
-    description="Add bulleted list item to Notion page",
-    func=add_bulleted_list_tool
+    name="Add Bulleted List Block",
+    description="Add bulleted list item to Notion page. Supports both text and rich_text_array. Input: JSON with page_id and text/rich_text_array",
+    func=add_bulleted_list_tool_func
 )
 
 add_numbered_list_tool_obj = Tool(
-    name="Add Numbered List", 
-    description="Add numbered list item to Notion page",
-    func=add_numbered_list_tool
+    name="Add Numbered List Block",
+    description="Add numbered list item to Notion page. Supports both text and rich_text_array. Input: JSON with page_id and text/rich_text_array",
+    func=add_numbered_list_tool_func
 )
 
 add_table_of_contents_tool_obj = Tool(
-    name="Add Table of Contents",
-    description="Add table of contents block to Notion page for navigation",
-    func=add_table_of_contents_tool
+    name="Add Table of Contents Block",
+    description="Add table of contents block to Notion page. Input: JSON with page_id",
+    func=add_table_of_contents_tool_func
 )
 
 add_breadcrumb_tool_obj = Tool(
     name="Add Breadcrumb Block",
-    description="Add breadcrumb navigation block to Notion page",
-    func=add_breadcrumb_tool
+    description="Add breadcrumb navigation block to Notion page. Input: JSON with page_id",
+    func=add_breadcrumb_tool_func
 )
 
 add_equation_tool_obj = Tool(
     name="Add Equation Block",
-    description="Add mathematical equation block to Notion page with LaTeX expressions",
-    func=add_equation_tool
+    description="Add mathematical equation block to Notion page. Input: JSON with page_id and optional expression",
+    func=add_equation_tool_func
 )
 
 add_table_tool_obj = Tool(
     name="Add Table Block",
-    description="Add table block to Notion page with customizable columns and headers",
-    func=add_table_tool
+    description="Add table block to Notion page. Input: JSON with page_id and optional table_width, table_height, has_column_header, has_row_header",
+    func=add_table_tool_func
 )
 
 add_image_tool = Tool(
     name="Add Image Block",
-    description="Add image block to Notion page with URL and optional caption",
-    func=add_image_block_tool
+    description="Add image block to Notion page. Input: JSON with page_id, image_url, and optional caption",
+    func=add_image_block_tool_func
 )
 
 add_video_tool = Tool(
     name="Add Video Block",
-    description="Add video block to Notion page (YouTube, Vimeo, etc.)",
-    func=add_video_block_tool
+    description="Add video block to Notion page. Input: JSON with page_id, video_url, and optional caption",
+    func=add_video_block_tool_func
 )
 
 add_embed_tool = Tool(
     name="Add Embed Block",
-    description="Add embed block to Notion page for external content",
-    func=add_embed_block_tool
+    description="Add embed block to Notion page. Input: JSON with page_id, embed_url, and optional caption",
+    func=add_embed_block_tool_func
 )
 
 add_url_tool = Tool(
     name="Add URL Block",
-    description="Add URL link block to Notion page with optional title",
-    func=add_url_block_tool
+    description="Add URL link block to Notion page. Input: JSON with page_id, url, and optional title",
+    func=add_url_block_tool_func
 )
 
 add_bookmark_tool = Tool(
     name="Add Bookmark Block", 
-    description="Add bookmark preview block to Notion page with URL and optional caption",
-    func=add_bookmark_block_tool
+    description="Add bookmark preview block to Notion page. Input: JSON with page_id, bookmark_url, and optional caption",
+    func=add_bookmark_block_tool_func
 )
 
-
-
+## Removed rich-text-specific duplicate tools. Unified tools below accept either "text" or "rich_text_array".
